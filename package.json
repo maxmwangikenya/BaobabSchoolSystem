@@ -1,0 +1,19 @@
+{
+  "name": "baobabprojects",
+  "version": "1.0.0",
+  "description": "mysql crud add child",
+  "main": "app.js",
+  "scripts": {
+    "test": "nodemon app.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "epress": "^0.0.1-security",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.2",
+    "mysql": "^2.18.1",
+    "mysql2": "^3.14.0"
+  }
+}
