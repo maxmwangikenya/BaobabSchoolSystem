@@ -1,4 +1,4 @@
-const express = require('express');
+const express = require('express'); 
 const mysql = require('mysql2');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -10,7 +10,7 @@ const port = 3000;
 
 app.use(bodyParser.json());
 app.use(cors());
-app.use('/uploads', express.static('uploads')); // Serve uploaded images
+app.use('/uploads', express.static('uploads'));
 
 // Database Connection
 const db = mysql.createConnection({
@@ -37,9 +37,9 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// Create Children Table with Image Columns
-app.get('/createchildtable', (req, res) => {
-    let sql = `
+// Create Tables
+app.get('/createtables', (req, res) => {
+    let sqlChildren = `
         CREATE TABLE IF NOT EXISTS children (
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
@@ -47,66 +47,81 @@ app.get('/createchildtable', (req, res) => {
             history TEXT,
             parent_name VARCHAR(255),
             sibling_names TEXT,
-            profile_picture VARCHAR(255),  -- Stores path to the child's profile picture
-            history_picture VARCHAR(255)   -- Stores path to the child's history picture
-        )
-    `;
-    db.query(sql, (err, result) => {
+            profile_picture VARCHAR(255),
+            history_picture VARCHAR(255)
+        )`;
+
+    let sqlSponsors = `
+        CREATE TABLE IF NOT EXISTS sponsors (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            spouse_name VARCHAR(255),
+            email VARCHAR(255),
+            profile_picture VARCHAR(255)
+        )`;
+
+    let sqlSponsorships = `
+        CREATE TABLE IF NOT EXISTS sponsorships (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            sponsor_id INT,
+            child_id INT,
+            FOREIGN KEY (sponsor_id) REFERENCES sponsors(id) ON DELETE CASCADE,
+            FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE
+        )`;
+
+    db.query(sqlChildren, (err, result) => { if (err) return res.status(500).send(err); });
+    db.query(sqlSponsors, (err, result) => { if (err) return res.status(500).send(err); });
+    db.query(sqlSponsorships, (err, result) => { if (err) return res.status(500).send(err); });
+    res.send('Tables created successfully');
+});
+
+// Add a Sponsor
+app.post('/sponsors', upload.single('profile_picture'), (req, res) => {
+    const { name, spouse_name, email } = req.body;
+    const profilePicturePath = req.file ? req.file.path : null;
+
+    let sql = 'INSERT INTO sponsors (name, spouse_name, email, profile_picture) VALUES (?, ?, ?, ?)';
+    db.query(sql, [name, spouse_name, email, profilePicturePath], (err, result) => {
         if (err) return res.status(500).send(err);
-        res.send('Children table created successfully');
+        res.json({ message: 'Sponsor added', id: result.insertId });
     });
 });
 
-// Add a Child with Profile Picture & History Picture
-app.post('/children', upload.fields([{ name: 'profile_picture' }, { name: 'history_picture' }]), (req, res) => {
-    const { name, grade, history, parent_name, sibling_names } = req.body;
-    const profilePicturePath = req.files['profile_picture'] ? req.files['profile_picture'][0].path : null;
-    const historyPicturePath = req.files['history_picture'] ? req.files['history_picture'][0].path : null;
-
-    let sql = 'INSERT INTO children (name, grade, history, parent_name, sibling_names, profile_picture, history_picture) VALUES (?, ?, ?, ?, ?, ?, ?)';
-    db.query(sql, [name, grade, history, parent_name, sibling_names, profilePicturePath, historyPicturePath], (err, result) => {
+// Link a Sponsor to a Child
+app.post('/sponsorships', (req, res) => {
+    const { sponsor_id, child_id } = req.body;
+    let sql = 'INSERT INTO sponsorships (sponsor_id, child_id) VALUES (?, ?)';
+    db.query(sql, [sponsor_id, child_id], (err, result) => {
         if (err) return res.status(500).send(err);
-        res.json({ message: 'Child added', id: result.insertId });
+        res.json({ message: 'Sponsorship created' });
     });
 });
 
-// Update Child's Information and Pictures
-app.put('/children/:id', upload.fields([{ name: 'profile_picture' }, { name: 'history_picture' }]), (req, res) => {
-    const { name, grade, history, parent_name, sibling_names } = req.body;
-    const profilePicturePath = req.files['profile_picture'] ? req.files['profile_picture'][0].path : null;
-    const historyPicturePath = req.files['history_picture'] ? req.files['history_picture'][0].path : null;
-
-    let sql = `UPDATE children SET name=?, grade=?, history=?, parent_name=?, sibling_names=? 
-               ${profilePicturePath ? ", profile_picture=?" : ""} 
-               ${historyPicturePath ? ", history_picture=?" : ""}
-               WHERE id=?`;
-
-    const values = [name, grade, history, parent_name, sibling_names];
-    if (profilePicturePath) values.push(profilePicturePath);
-    if (historyPicturePath) values.push(historyPicturePath);
-    values.push(req.params.id);
-
-    db.query(sql, values, (err, result) => {
-        if (err) return res.status(500).send(err);
-        res.json({ message: 'Child updated' });
-    });
-});
-
-// Get All Children (with Image URLs)
-app.get('/children', (req, res) => {
-    let sql = 'SELECT *, CONCAT("http://localhost:3000/", profile_picture) AS profile_picture_url, CONCAT("http://localhost:5000/", history_picture) AS history_picture_url FROM children';
+// Get All Sponsors with Sponsored Children
+app.get('/sponsors', (req, res) => {
+    let sql = `
+        SELECT sponsors.*, GROUP_CONCAT(children.name) AS sponsored_children 
+        FROM sponsors 
+        LEFT JOIN sponsorships ON sponsors.id = sponsorships.sponsor_id 
+        LEFT JOIN children ON sponsorships.child_id = children.id 
+        GROUP BY sponsors.id`;
     db.query(sql, (err, results) => {
         if (err) return res.status(500).send(err);
         res.json(results);
     });
 });
 
-// Delete a Child
-app.delete('/children/:id', (req, res) => {
-    let sql = 'DELETE FROM children WHERE id=?';
-    db.query(sql, [req.params.id], (err, result) => {
+// Get All Children with Their Sponsors
+app.get('/children', (req, res) => {
+    let sql = `
+        SELECT children.*, GROUP_CONCAT(sponsors.name) AS sponsors 
+        FROM children 
+        LEFT JOIN sponsorships ON children.id = sponsorships.child_id 
+        LEFT JOIN sponsors ON sponsorships.sponsor_id = sponsors.id 
+        GROUP BY children.id`;
+    db.query(sql, (err, results) => {
         if (err) return res.status(500).send(err);
-        res.json({ message: 'Child deleted' });
+        res.json(results);
     });
 });
 
